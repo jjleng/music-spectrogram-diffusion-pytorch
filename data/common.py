@@ -66,19 +66,19 @@ class Base(Dataset):
 
         if not self.with_context:
             data, _ = sf.read(
-                wav_file, start=offset, frames=frames, dtype='float32', always_2d=True)
+                str(wav_file), start=offset, frames=frames, dtype='float32', always_2d=True)
             data = data.mean(axis=1)
             return data
 
         ctx_offset = offset - frames
         if ctx_offset >= 0:
-            ctx, _ = sf.read(wav_file, start=ctx_offset,
+            ctx, _ = sf.read(str(wav_file), start=ctx_offset,
                              frames=frames * 2, dtype='float32', always_2d=True)
             data = ctx[frames:]
             ctx = ctx[:frames]
         else:
             data, _ = sf.read(
-                wav_file, start=offset, frames=frames, dtype='float32', always_2d=True)
+                str(wav_file), start=offset, frames=frames, dtype='float32', always_2d=True)
             ctx = np.zeros_like(data)
         data = data.mean(axis=1)
         ctx = ctx.mean(axis=1)
