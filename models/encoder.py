@@ -85,6 +85,15 @@ class EncoderLayer(nn.TransformerEncoderLayer):
 
         return x
 
+    def _sa_block(self, x: Tensor,
+                  attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor]) -> Tensor:
+        """Self-attention block - override to remove is_causal argument"""
+        x = self.self_attn(x, x, x,
+                          attn_mask=attn_mask,
+                          key_padding_mask=key_padding_mask,
+                          need_weights=False)[0]
+        return self.dropout1(x)
+
 
 class Encoder(nn.TransformerEncoder):
     def __init__(self, layers, emb_dim, nhead, head_dim,  **kargs) -> None:
