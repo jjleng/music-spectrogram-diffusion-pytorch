@@ -3,38 +3,27 @@ from pytorch_lightning.cli import LightningCLI
 from lightning import AutoregressiveLM, DiffusionLM
 from lightning.mock import MockData
 from lightning.data import ConcatData
-from pytorch_lightning.callbacks import ModelCheckpoint, ModelSummary, RichProgressBar
-from pytorch_lightning.callbacks.progress.rich_progress import RichProgressBarTheme
+from pytorch_lightning.callbacks import ModelCheckpoint, ModelSummary, TQDMProgressBar
 
 def cli_main():
-    # Custom theme for a cleaner look
-    progress_bar = RichProgressBar(
-        theme=RichProgressBarTheme(
-            description="green_yellow",
-            progress_bar="green1",
-            progress_bar_finished="green1",
-            batch_progress="green_yellow",
-            time="grey82",
-            processing_speed="grey82",
-            metrics="grey82",
-        ),
-        refresh_rate=500 # Radical reduction: update every 500 batches
-    )
+    # TQDMProgressBar works properly in Colab (updates in place)
+    # refresh_rate=1000 means update only every 1000 batches
+    progress_bar = TQDMProgressBar(refresh_rate=1000)
 
     cli = LightningCLI(
         trainer_defaults={
             'accelerator': 'gpu',
-            'strategy': 'ddp',
-            'enable_progress_bar': False, # Disable default to use RichProgressBar
-            'log_every_n_steps': 500, # Match progress bar to save disk logs
+            'strategy': 'auto',
+            'enable_progress_bar': False, # Disable default, use ours
+            'log_every_n_steps': 1000,    # Log less to save disk
             'callbacks': [
                 ModelCheckpoint(
-                    save_top_k=1, # Keep ONLY the best one to save disk space (~1.6GB each!)
+                    save_top_k=1,
                     save_last=True,
                     every_n_train_steps=10000,
                     filename='{epoch}-{step}',
                 ),
-                ModelSummary(max_depth=1), # Minimal summary
+                ModelSummary(max_depth=1),
                 progress_bar
             ]
         }
@@ -43,3 +32,4 @@ def cli_main():
 
 if __name__ == "__main__":
     cli_main()
+
