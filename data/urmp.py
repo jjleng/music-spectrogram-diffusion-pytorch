@@ -26,16 +26,27 @@ class URMP(Base):
         for track_id in range(1, self._num_tracks_total + 1):
             track_id = f"{track_id:02d}"
 
-            wav_file = list(
-                wav_path.glob(os.path.join(str(track_id) + "_*", "AuMix*.wav"))
-            )[0]
-            full_name = os.path.basename(os.path.dirname(wav_file))
-            midi_file = midi_path / (full_name + ".mid")
+            try:
+                wav_files = list(
+                    wav_path.glob(os.path.join(str(track_id) + "_*", "AuMix*.wav"))
+                )
+                if not wav_files:
+                    continue  # Skip if no matching WAV found
 
-            if track_id in self._val_ids:
-                val_mapping[track_id] = (wav_file, midi_file)
-            else:
-                train_mapping[track_id] = (wav_file, midi_file)
+                wav_file = wav_files[0]
+                full_name = os.path.basename(os.path.dirname(wav_file))
+                midi_file = midi_path / (full_name + ".mid")
+
+                if not midi_file.exists():
+                    continue  # Skip if MIDI doesn't exist
+
+                if track_id in self._val_ids:
+                    val_mapping[track_id] = (wav_file, midi_file)
+                else:
+                    train_mapping[track_id] = (wav_file, midi_file)
+            except Exception as e:
+                print(f"⚠️  Skip URMP track {track_id}: {str(e)[:50]}")
+                continue
 
         if split == "train":
             mapping = train_mapping
