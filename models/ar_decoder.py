@@ -15,6 +15,23 @@ class DecoderLayer(nn.TransformerDecoderLayer):
             emb_dim, nhead, head_dim, dropout)
         self.linear1 = nn.Linear(emb_dim, 2 * self.linear1.weight.shape[0])
 
+    def _sa_block(self, x, attn_mask, key_padding_mask):
+        """Self-attention block - override to remove is_causal argument"""
+        x = self.self_attn(x, x, x,
+                          attn_mask=attn_mask,
+                          key_padding_mask=key_padding_mask,
+                          need_weights=False)[0]
+        return self.dropout1(x)
+
+    def _mha_block(self, x, mem, attn_mask, key_padding_mask):
+        """Multi-head attention block - override to remove is_causal argument"""
+        x = self.multihead_attn(x, mem, mem,
+                               attn_mask=attn_mask,
+                               key_padding_mask=key_padding_mask,
+                               need_weights=False)[0]
+        return self.dropout2(x)
+
+
 
 class Decoder(nn.TransformerDecoder):
     def __init__(self, layers, emb_dim, nhead, head_dim, **kargs) -> None:
