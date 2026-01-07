@@ -44,9 +44,44 @@ class GuitarSet(Base):
         for file in tqdm(file_names):
             try:
                 tmp = jams.load(f"{path}/annotation/{file}")
-                title = tmp["file_metadata"]["title"]
 
-                wav_file = f"{path}/audio_mono-mic/{title}_mic.wav"
+                # Use JAMS filename as base (more reliable than internal title)
+                base_name = file.replace('.jams', '')
+
+                # Try multiple audio file patterns
+                candidate_names = [
+                    f"{base_name}_mic.wav",
+                    f"{base_name}.wav",
+                    f"{base_name}_mix.wav",
+                ]
+                candidate_dirs = ["audio_mono-mic", "audio", "audio_hex-pickup_original", "audio_mono-pickup_original"]
+                found_wav = None
+
+                for d in candidate_dirs:
+                    for name in candidate_names:
+                        p = os.path.join(path, d, name)
+                        if os.path.exists(p):
+                            found_wav = p
+                            break
+                    if found_wav:
+                        break
+
+                # If not found in expected dirs, try recursive search (slow fallback)
+                if not found_wav:
+                    for root, _, files in os.walk(path):
+                        for file_name in files:
+                            if file_name.startswith(base_name) and file_name.endswith(".wav"):
+                                found_wav = os.path.join(root, file_name)
+                                break
+                        if found_wav: break
+
+                if not found_wav:
+                    # Audio file missing - skip this annotation
+                    print(f"⚠️  Skip {file}: Audio not found for '{base_name}'")
+                    continue
+
+                wav_file = found_wav
+
                 info = sf.info(wav_file)
                 sr = info.samplerate
                 frames = info.frames
