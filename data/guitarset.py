@@ -40,17 +40,21 @@ class GuitarSet(Base):
                 file for file in file_names if file.split("-")[0][-1] == "3"]
         else:
             raise ValueError(f'Invalid split: {split}')
-        
-        for file in tqdm(file_names):
-            tmp = jams.load(f"{path}/annotation/{file}")
-            title = tmp["file_metadata"]["title"]
 
-            wav_file = f"{path}/audio_mono-mic/{title}_mic.wav"
-            info = sf.info(wav_file)
-            sr = info.samplerate
-            frames = info.frames
-            ns = get_noteseq(tmp)
-            ns = note_seq.apply_sustain_control_changes(ns)
-            data_list.append((wav_file, ns, sr, frames))
+        for file in tqdm(file_names):
+            try:
+                tmp = jams.load(f"{path}/annotation/{file}")
+                title = tmp["file_metadata"]["title"]
+
+                wav_file = f"{path}/audio_mono-mic/{title}_mic.wav"
+                info = sf.info(wav_file)
+                sr = info.samplerate
+                frames = info.frames
+                ns = get_noteseq(tmp)
+                ns = note_seq.apply_sustain_control_changes(ns)
+                data_list.append((wav_file, ns, sr, frames))
+            except Exception as e:
+                print(f"⚠️  Skip {file}: {str(e)[:60]}")
+                continue
 
         super().__init__(data_list, **kwargs)

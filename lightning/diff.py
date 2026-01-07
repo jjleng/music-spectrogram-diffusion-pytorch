@@ -9,7 +9,7 @@ from tqdm import tqdm
 from models.diff_decoder import MIDI2SpecDiff
 from .mel import MelFeature
 from .scaler import get_scaler
-from .eval_utils import (get_models, calculate_metrics, aggregate_metrics, get_wav, 
+from .eval_utils import (get_models, calculate_metrics, aggregate_metrics, get_wav,
                          StreamingMultivariateGaussian)
 
 
@@ -177,7 +177,7 @@ class DiffusionLM(pl.LightningModule):
         loss = F.l1_loss(noise_hat, noise)
         return loss.item()
 
-    def validation_epoch_end(self, outputs) -> None:
+    def on_validation_epoch_end(self, outputs) -> None:
         avg_loss = sum(outputs) / len(outputs)
         self.log('val_loss', avg_loss, prog_bar=True, sync_dist=True)
 
@@ -189,7 +189,7 @@ class DiffusionLM(pl.LightningModule):
         self.vggish_fn = lambda x, sr: vggish_model(x)
         self.trill_fn = lambda x, sr: trill_model(
             x, sample_rate=sr)['embedding']
-        
+
         self.true_dists = defaultdict(StreamingMultivariateGaussian)
         self.pred_dists = defaultdict(StreamingMultivariateGaussian)
 
@@ -216,11 +216,11 @@ class DiffusionLM(pl.LightningModule):
         metric["loss"] = loss.item()
         return metric
 
-    def test_epoch_end(self, outputs) -> None:
+    def on_test_epoch_end(self, outputs) -> None:
         metrics = aggregate_metrics(outputs, self.true_dists, self.pred_dists)
         self.log_dict(metrics, prog_bar=True, sync_dist=True)
 
-        return super().test_epoch_end(outputs)
+        return super().on_test_epoch_end(outputs)
 
     def spec_to_wav(self, spec):
         return get_wav(self.melgan, spec)
