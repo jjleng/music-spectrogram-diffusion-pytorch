@@ -55,6 +55,10 @@ class DiffusionLM(pl.LightningModule):
                  **mel_kwargs) -> None:
         super().__init__()
 
+        # For Lightning 2.0+ compatibility - store outputs manually
+        self.validation_step_outputs: list = []
+        self.test_step_outputs: list = []
+
         self.cfg_dropout = cfg_dropout
         self.cfg_weighting = cfg_weighting
         self.output_dim = output_dim
@@ -175,11 +179,15 @@ class DiffusionLM(pl.LightningModule):
         z_t, t, noise = self.get_training_inputs(spec, uniform=True)
         noise_hat = self.model(midi, z_t, t, context)
         loss = F.l1_loss(noise_hat, noise)
+        self.validation_step_outputs.append(loss.item())
         return loss.item()
 
-    def on_validation_epoch_end(self, outputs) -> None:
-        avg_loss = sum(outputs) / len(outputs)
-        self.log('val_loss', avg_loss, prog_bar=True, sync_dist=True)
+    def on_validation_epoch_end(self) -> None:
+        outputs = self.validation_step_outputs
+        if outputs:
+            avg_loss = sum(outputs) / len(outputs)
+            self.log('val_loss', avg_loss, prog_bar=True, sync_dist=True)
+        self.validation_step_outputs.clear()
 
     def configure_optimizers(self):
         return optim.Adafactor(self.parameters(), lr=1e-3)
@@ -214,13 +222,15 @@ class DiffusionLM(pl.LightningModule):
             orig_wav, pred_wav, self.vggish_fn, self.trill_fn, self.true_dists, self.pred_dists
         )
         metric["loss"] = loss.item()
+        self.test_step_outputs.append(metric)
         return metric
 
-    def on_test_epoch_end(self, outputs) -> None:
-        metrics = aggregate_metrics(outputs, self.true_dists, self.pred_dists)
-        self.log_dict(metrics, prog_bar=True, sync_dist=True)
-
-        return super().on_test_epoch_end(outputs)
+    def on_test_epoch_end(self) -> None:
+        outputs = self.test_step_outputs
+        if outputs:
+            metrics = aggregate_metrics(outputs, self.true_dists, self.pred_dists)
+            self.log_dict(metrics, prog_bar=True, sync_dist=True)
+        self.test_step_outputs.clear()
 
     def spec_to_wav(self, spec):
         return get_wav(self.melgan, spec)
