@@ -1,5 +1,8 @@
 import pytorch_lightning as pl
 import torch
+import pickle
+import hashlib
+from pathlib import Path
 from torch.utils.data import DataLoader, ConcatDataset, default_collate, WeightedRandomSampler
 from torch.nn.utils.rnn import pad_sequence
 from itertools import chain
@@ -9,6 +12,31 @@ from data.urmp import URMP
 from data.slakh import Slakh2100
 from data.guitarset import GuitarSet
 from preprocessor.event_codec import Codec
+
+
+def _get_cache_key(dataset_class: str, path: str, split: str, **kwargs) -> str:
+    """Generate a unique cache key based on dataset parameters."""
+    key_data = f"{dataset_class}_{path}_{split}_{kwargs}"
+    return hashlib.md5(key_data.encode()).hexdigest()[:16]
+
+
+def _load_cached_dataset(cache_dir: Path, cache_key: str):
+    """Load a cached dataset if it exists."""
+    cache_file = cache_dir / f"{cache_key}.pkl"
+    if cache_file.exists():
+        print(f"Loading cached dataset from {cache_file}")
+        with open(cache_file, 'rb') as f:
+            return pickle.load(f)
+    return None
+
+
+def _save_cached_dataset(cache_dir: Path, cache_key: str, dataset) -> None:
+    """Save a dataset to cache."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = cache_dir / f"{cache_key}.pkl"
+    print(f"Saving dataset cache to {cache_file}")
+    with open(cache_file, 'wb') as f:
+        pickle.dump(dataset, f)
 
 
 def get_padding_collate_fn(output_size: int):
@@ -40,10 +68,42 @@ class ConcatData(pl.LightningDataModule):
                  guitarset_path: str = None,
                  urmp_wav_path: str = None,
                  urmp_midi_path: str = None,
-                 sampling_temperature: float = 0.3
+                 sampling_temperature: float = 0.3,
+                 cache_dir: str = None,
                  ):
         super().__init__()
         self.save_hyperparameters()
+        # Always cache: use provided dir or default to local .dataset_cache
+        self.cache_dir = Path(cache_dir) if cache_dir else Path(".dataset_cache")
+
+    def _load_or_create_dataset(self, dataset_class, split: str, factory_kwargs: dict, **dataset_kwargs):
+        """Load dataset from cache or create it."""
+        # Build cache key from all relevant parameters
+        path_str = str(dataset_kwargs.get('path', dataset_kwargs.get('wav_path', '')))
+        cache_key = _get_cache_key(
+            dataset_class.__name__,
+            path_str,
+            split,
+            sample_rate=self.hparams.sample_rate,
+            segment_length=self.hparams.segment_length,
+            with_context=self.hparams.with_context,
+        )
+
+        # Try loading from cache
+        if self.cache_dir:
+            cached = _load_cached_dataset(self.cache_dir, cache_key)
+            if cached is not None:
+                return cached
+
+        # Create dataset
+        print(f"Creating {dataset_class.__name__} ({split})...")
+        dataset = dataset_class(split=split, **factory_kwargs, **dataset_kwargs)
+
+        # Save to cache
+        if self.cache_dir:
+            _save_cached_dataset(self.cache_dir, cache_key, dataset)
+
+        return dataset
 
     def setup(self, stage=None):
         resolution = 100
@@ -61,24 +121,25 @@ class ConcatData(pl.LightningDataModule):
         if stage == "fit":
             train_datasets = []
             if self.hparams.musicnet_path is not None:
-                train_datasets.append(
-                    MusicNet(path=self.hparams.musicnet_path, split='train', **factory_kwargs))
+                train_datasets.append(self._load_or_create_dataset(
+                    MusicNet, 'train', factory_kwargs, path=self.hparams.musicnet_path))
 
             if self.hparams.maestro_path is not None:
-                train_datasets.append(
-                    Maestro(path=self.hparams.maestro_path, split='train', **factory_kwargs))
+                train_datasets.append(self._load_or_create_dataset(
+                    Maestro, 'train', factory_kwargs, path=self.hparams.maestro_path))
 
             if self.hparams.urmp_wav_path is not None and self.hparams.urmp_midi_path is not None:
-                train_datasets.append(
-                    URMP(wav_path=self.hparams.urmp_wav_path, midi_path=self.hparams.urmp_midi_path, split='train', **factory_kwargs))
+                train_datasets.append(self._load_or_create_dataset(
+                    URMP, 'train', factory_kwargs,
+                    wav_path=self.hparams.urmp_wav_path, midi_path=self.hparams.urmp_midi_path))
 
             if self.hparams.slakh_path is not None:
-                train_datasets.append(
-                    Slakh2100(path=self.hparams.slakh_path, split='train', **factory_kwargs))
+                train_datasets.append(self._load_or_create_dataset(
+                    Slakh2100, 'train', factory_kwargs, path=self.hparams.slakh_path))
 
             if self.hparams.guitarset_path is not None:
-                train_datasets.append(
-                    GuitarSet(path=self.hparams.guitarset_path, split='train', **factory_kwargs))
+                train_datasets.append(self._load_or_create_dataset(
+                    GuitarSet, 'train', factory_kwargs, path=self.hparams.guitarset_path))
 
             train_num_samples = [len(dataset) for dataset in train_datasets]
             dataset_weights = [
@@ -98,48 +159,50 @@ class ConcatData(pl.LightningDataModule):
         if stage == "validate" or stage == "fit":
             val_datasets = []
             if self.hparams.musicnet_path is not None:
-                val_datasets.append(
-                    MusicNet(path=self.hparams.musicnet_path, split='val', **factory_kwargs))
+                val_datasets.append(self._load_or_create_dataset(
+                    MusicNet, 'val', factory_kwargs, path=self.hparams.musicnet_path))
 
             if self.hparams.maestro_path is not None:
-                val_datasets.append(
-                    Maestro(path=self.hparams.maestro_path, split='val', **factory_kwargs))
+                val_datasets.append(self._load_or_create_dataset(
+                    Maestro, 'val', factory_kwargs, path=self.hparams.maestro_path))
 
             if self.hparams.urmp_wav_path is not None and self.hparams.urmp_midi_path is not None:
-                val_datasets.append(
-                    URMP(wav_path=self.hparams.urmp_wav_path, midi_path=self.hparams.urmp_midi_path, split='val', **factory_kwargs))
+                val_datasets.append(self._load_or_create_dataset(
+                    URMP, 'val', factory_kwargs,
+                    wav_path=self.hparams.urmp_wav_path, midi_path=self.hparams.urmp_midi_path))
 
             if self.hparams.slakh_path is not None:
-                val_datasets.append(
-                    Slakh2100(path=self.hparams.slakh_path, split='val', **factory_kwargs))
+                val_datasets.append(self._load_or_create_dataset(
+                    Slakh2100, 'val', factory_kwargs, path=self.hparams.slakh_path))
 
             if self.hparams.guitarset_path is not None:
-                val_datasets.append(
-                    GuitarSet(path=self.hparams.guitarset_path, split='val', **factory_kwargs))
+                val_datasets.append(self._load_or_create_dataset(
+                    GuitarSet, 'val', factory_kwargs, path=self.hparams.guitarset_path))
 
             self.val_dataset = ConcatDataset(val_datasets)
 
         if stage == "test":
             test_datasets = []
             if self.hparams.musicnet_path is not None:
-                test_datasets.append(
-                    MusicNet(path=self.hparams.musicnet_path, split='test', **factory_kwargs))
+                test_datasets.append(self._load_or_create_dataset(
+                    MusicNet, 'test', factory_kwargs, path=self.hparams.musicnet_path))
 
             if self.hparams.maestro_path is not None:
-                test_datasets.append(
-                    Maestro(path=self.hparams.maestro_path, split='test', **factory_kwargs))
+                test_datasets.append(self._load_or_create_dataset(
+                    Maestro, 'test', factory_kwargs, path=self.hparams.maestro_path))
 
             if self.hparams.urmp_wav_path is not None and self.hparams.urmp_midi_path is not None:
-                test_datasets.append(
-                    URMP(wav_path=self.hparams.urmp_wav_path, midi_path=self.hparams.urmp_midi_path, split='test', **factory_kwargs))
+                test_datasets.append(self._load_or_create_dataset(
+                    URMP, 'test', factory_kwargs,
+                    wav_path=self.hparams.urmp_wav_path, midi_path=self.hparams.urmp_midi_path))
 
             if self.hparams.slakh_path is not None:
-                test_datasets.append(
-                    Slakh2100(path=self.hparams.slakh_path, split='test', **factory_kwargs))
+                test_datasets.append(self._load_or_create_dataset(
+                    Slakh2100, 'test', factory_kwargs, path=self.hparams.slakh_path))
 
             if self.hparams.guitarset_path is not None:
-                test_datasets.append(
-                    GuitarSet(path=self.hparams.guitarset_path, split='test', **factory_kwargs))
+                test_datasets.append(self._load_or_create_dataset(
+                    GuitarSet, 'test', factory_kwargs, path=self.hparams.guitarset_path))
 
             self.test_dataset = ConcatDataset(test_datasets)
 

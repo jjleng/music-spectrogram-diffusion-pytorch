@@ -1,4 +1,5 @@
 import torch
+import torchaudio
 from torch.utils.data import Dataset
 import soundfile as sf
 from pathlib import Path
@@ -87,25 +88,39 @@ class Base(Dataset):
     def __getitem__(self, index: int) -> torch.Tensor:
         file_idx, chunk_idx = self._get_file_idx_and_chunk_idx(index)
         tokens = self.data_list[file_idx][1][chunk_idx]
+        source_sr = self.data_list[file_idx][2]  # Source file sample rate
 
         if not self.with_context:
             data = self._get_waveforms(file_idx, chunk_idx)
-            if data.shape[0] != self.segment_length:
-                data = resampy.resample(data, data.shape[0], self.segment_length, axis=0, filter='kaiser_fast')[
-                    :self.segment_length]
-                if data.shape[0] < self.segment_length:
-                    data = np.pad(
-                        data, ((0, self.segment_length - data.shape[0]),), 'constant')
+            if source_sr != self.sr:
+                # Resample using actual sample rates
+                data_t = torch.from_numpy(data)
+                data_t = torchaudio.functional.resample(data_t, source_sr, self.sr)
+                data = data_t.numpy()
+
+            # Ensure exact length (handle rounding differences)
+            if data.shape[0] > self.segment_length:
+                data = data[:self.segment_length]
+            elif data.shape[0] < self.segment_length:
+                data = np.pad(data, (0, self.segment_length - data.shape[0]), 'constant')
             return tokens, data
 
         data, ctx = self._get_waveforms(file_idx, chunk_idx)
 
-        if data.shape[0] != self.segment_length:
+        if source_sr != self.sr:
+            # Stack for efficiency: (2, T)
             tmp = np.vstack([ctx, data])
-            tmp = resampy.resample(tmp, data.shape[0], self.segment_length, axis=1, filter='kaiser_fast')[
-                :, :self.segment_length]
-            if tmp.shape[1] < self.segment_length:
-                tmp = np.pad(
-                    tmp, ((0, 0), (0, self.segment_length - tmp.shape[1])), 'constant')
-            ctx, data = tmp
+            tmp_t = torch.from_numpy(tmp)
+            tmp_t = torchaudio.functional.resample(tmp_t, source_sr, self.sr)
+            tmp = tmp_t.numpy()
+            ctx, data = tmp[0], tmp[1]
+
+        # Ensure exact length
+        if data.shape[0] > self.segment_length:
+            data = data[:self.segment_length]
+            ctx = ctx[:self.segment_length]
+        elif data.shape[0] < self.segment_length:
+            data = np.pad(data, (0, self.segment_length - data.shape[0]), 'constant')
+            ctx = np.pad(ctx, (0, self.segment_length - ctx.shape[0]), 'constant')
+
         return tokens, data, ctx
