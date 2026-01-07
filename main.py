@@ -25,6 +25,7 @@ def cli_main():
         trainer_defaults={
             'accelerator': 'gpu',
             'strategy': 'ddp',
+            'enable_progress_bar': False, # Disable default to use RichProgressBar
             'log_every_n_steps': 500, # Match progress bar to save disk logs
             'callbacks': [
                 ModelCheckpoint(
