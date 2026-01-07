@@ -17,6 +17,7 @@ class MultiheadAttention(nn.Module):
         self.dropout = dropout
         self.head_dim = head_dim
         self.num_heads = nhead
+        self.batch_first = True  # Required for PyTorch 2.x compatibility
 
         self.q_proj = nn.Linear(emb_dim, head_dim * nhead, bias=False)
         self.k_proj = nn.Linear(emb_dim, head_dim * nhead, bias=False)
